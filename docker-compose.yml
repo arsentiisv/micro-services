@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: marketplace
+    ports:
+      - "5455:5432"  # <-- ИЗМЕНЕНО: Нестандартный порт 5455, чтобы избежать конфликтов
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d marketplace"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  flyway:
+    image: flyway/flyway:9-alpine
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./db/migrations:/flyway/sql
+    # Flyway внутри сети Docker, поэтому он всё ещё стучится на порт 5432 контейнера db
+    command: -url=jdbc:postgresql://db:5432/marketplace -user=postgres -password=postgres migrate
