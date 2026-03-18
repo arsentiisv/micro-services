@@ -1,0 +1,91 @@
+services:
+  # --- DATABASES ---
+  flight_db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: flight_user
+      POSTGRES_PASSWORD: flight_password
+      POSTGRES_DB: flight_db
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flight_user -d flight_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  booking_db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: booking_user
+      POSTGRES_PASSWORD: booking_password
+      POSTGRES_DB: booking_db
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U booking_user -d booking_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- REDIS SENTINEL SETUP ---
+  redis-master:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Sentinel is a built-in feature of the official redis image, just need a custom conf
+  redis-sentinel:
+    image: redis:7-alpine
+    command: redis-server /etc/redis/sentinel.conf --sentinel
+    volumes:
+      - ./sentinel.conf:/etc/redis/sentinel.conf
+    depends_on:
+      redis-master:
+        condition: service_healthy
+
+  # --- SERVICES ---
+  flight_service:
+    build:
+      context: .
+      dockerfile: flight_service/Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://flight_user:flight_password@flight_db:5432/flight_db
+      - REDIS_SENTINEL_HOST=redis-sentinel
+      - REDIS_SENTINEL_PORT=26379
+      - REDIS_MASTER_NAME=mymaster
+      - GRPC_PORT=50051
+      - API_KEY=super_secret_key
+    ports:
+      - "50051:50051"
+    depends_on:
+      flight_db:
+        condition: service_healthy
+      redis-sentinel:
+        condition: service_started
+
+  booking_service:
+    build:
+      context: .
+      dockerfile: booking_service/Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://booking_user:booking_password@booking_db:5432/booking_db
+      - FLIGHT_SERVICE_URL=flight_service:50051
+      - API_KEY=super_secret_key
+      # Настройки для Circuit Breaker
+      - CB_FAILURE_THRESHOLD=5
+      - CB_RECOVERY_TIMEOUT=30
+      # Настройки для Retry
+      - RETRY_MAX_ATTEMPTS=3
+      - RETRY_BACKOFF_BASE=0.1
+    ports:
+      - "8000:8000"
+    depends_on:
+      booking_db:
+        condition: service_healthy
+      flight_service:
+        condition: service_started
