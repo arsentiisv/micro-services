@@ -1,5 +1,6 @@
 # Схема БД (ER-диаграмма)
 
+```mermaid
 erDiagram
     %% --- FLIGHT SERVICE DB ---
     FLIGHT {
